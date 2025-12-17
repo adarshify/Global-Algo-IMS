@@ -4,54 +4,69 @@ import { Clock, Coffee, Phone, UserCheck, Moon, Laptop, Utensils } from 'lucide-
 
 const StatusToggle = () => {
   const [status, setStatus] = useState('Offline');
-  const [durations, setDurations] = useState({}); 
+  const [durations, setDurations] = useState({});
+  const [scheduledLogout, setScheduledLogout] = useState(null);
   const [loading, setLoading] = useState(false);
-  
-  // Get User Role to decide what buttons to show
   const role = localStorage.getItem('role');
 
-  // --- 1. SETUP TIMERS ---
+  // Helper: Is this user subject to strict rules? (Everyone except Admin)
+  const isStrictUser = role !== 'Admin';
+
+  // 1. Initial Load
   useEffect(() => {
     fetchStatus();
   }, []);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (status !== 'Offline') {
-        setDurations(prev => ({
-          ...prev,
-          [status]: (prev[status] || 0) + 1
-        }));
-      }
-    }, 1000); 
-
-    const syncInterval = setInterval(fetchStatus, 30000);
-
-    return () => {
-      clearInterval(interval);
-      clearInterval(syncInterval);
-    };
-  }, [status]);
 
   const fetchStatus = async () => {
     try {
       const res = await api.get('/attendance/current');
       setStatus(res.data.currentStatus || 'Offline');
       setDurations(res.data.durations || {});
+      if(res.data.scheduledLogout) setScheduledLogout(new Date(res.data.scheduledLogout));
     } catch (err) {
       console.error("Failed to fetch status");
     }
   };
 
-  const changeStatus = async (newStatus) => {
-    if (newStatus === status) return;
-    
-    // Only Employees need approval logic for Evaluation
-    if (newStatus === 'Evaluation') {
-      const confirm = window.confirm("Requesting 'Evaluation'. Proceed?");
-      if (!confirm) return;
-    }
+  // 2. THE HEARTBEAT (Runs every minute to check Rules)
+  useEffect(() => {
+    const ruleInterval = setInterval(() => {
+      // RULE: Automate for Employee, HR, AND BranchManager (Skip Admin)
+      if (!isStrictUser) return; 
+      
+      const now = new Date();
+      const hours = now.getHours();
+      const minutes = now.getMinutes();
 
+      // --- RULE A: AUTO LUNCH AT 1:40 PM (13:40) ---
+      if (hours === 13 && minutes === 38) {
+        alert("⚠️ Lunch time starts in 2 minutes!"); 
+      }
+
+      if (hours === 13 && minutes === 40) {
+        // Smart Check: Don't interrupt a call (even for managers if they are calling)
+        if (status !== 'Lunch Time' && status !== 'On-call') {
+          console.log("Auto-switching to Lunch");
+          performStatusChange('Lunch Time'); 
+        }
+      }
+
+      // --- RULE B: AUTO LOGOUT (Based on Calculated Time) ---
+      // Hard stop at 5:30 PM (17:30) regardless
+      if (hours === 17 && minutes === 30) {
+         if (status !== 'Offline' && status !== 'On-call') {
+           alert("Shift End: 5:30 PM. Logging out.");
+           performStatusChange('Offline');
+         }
+      }
+      
+    }, 60000); // Check every minute
+
+    return () => clearInterval(ruleInterval);
+  }, [status, role]);
+
+  // Helper function to actually hit the API
+  const performStatusChange = async (newStatus) => {
     setLoading(true);
     try {
       const res = await api.post('/attendance/status', { newStatus });
@@ -62,6 +77,39 @@ const StatusToggle = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // 3. MANUAL CLICK HANDLER (With Strict Blocks)
+  const changeStatus = async (newStatus) => {
+    if (newStatus === status) return;
+    
+    // --- STRICT RULES FOR EVERYONE (Except Admin) ---
+    if (isStrictUser) {
+      
+      // BLOCK MANUAL LUNCH
+      if (newStatus === 'Lunch Time') {
+        alert("🚫 System Message: Lunch is automated at 1:40 PM. You cannot switch manually.");
+        return;
+      }
+
+      // BLOCK MANUAL OFFLINE
+      if (newStatus === 'Offline') {
+        const timeString = scheduledLogout 
+          ? scheduledLogout.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) 
+          : '5:30 PM';
+        
+        alert(`🚫 System Message: Your shift ends automatically at ${timeString}. Manual logout is disabled.`);
+        return;
+      }
+
+      // Evaluation Confirmation (Mostly for Employees, but keeps logic safe)
+      if (newStatus === 'Evaluation') {
+        const confirm = window.confirm("Requesting 'Evaluation'. Proceed?");
+        if (!confirm) return;
+      }
+    }
+
+    performStatusChange(newStatus);
   };
 
   const formatTime = (totalSeconds) => {
@@ -82,20 +130,24 @@ const StatusToggle = () => {
 
   const getButtonColor = (key) => {
     if (status === key) return "bg-brand-medium text-white shadow-lg ring-2 ring-blue-300 transform scale-105"; 
+    
+    // Grey out disabled buttons visually for Strict Users
+    if (isStrictUser && (key === 'Lunch Time' || key === 'Offline')) {
+      return "bg-gray-100 text-gray-400 cursor-not-allowed border border-gray-200";
+    }
+
     return "bg-white text-gray-600 hover:bg-gray-50 border border-gray-200"; 
   };
 
-  // --- 2. DEFINE BUTTONS ---
   const ALL_OPTIONS = [
     { key: 'Online', icon: <Laptop size={16} />, allowed: ['BranchManager', 'HR', 'Employee'] },
-    { key: 'On-call', icon: <Phone size={16} />, allowed: ['Employee'] }, // Employee ONLY
+    { key: 'On-call', icon: <Phone size={16} />, allowed: ['Employee'] },
     { key: 'Break', icon: <Coffee size={16} />, allowed: ['BranchManager', 'HR', 'Employee'] },
     { key: 'Lunch Time', icon: <Utensils size={16} />, allowed: ['BranchManager', 'HR', 'Employee'] },
-    { key: 'Evaluation', icon: <UserCheck size={16} />, allowed: ['Employee'] }, // Employee ONLY
+    { key: 'Evaluation', icon: <UserCheck size={16} />, allowed: ['Employee'] },
     { key: 'Offline', icon: <Moon size={16} />, allowed: ['BranchManager', 'HR', 'Employee'] },
   ];
 
-  // --- 3. FILTER BUTTONS BASED ON ROLE ---
   const visibleOptions = ALL_OPTIONS.filter(opt => opt.allowed.includes(role));
 
   return (
@@ -122,7 +174,6 @@ const StatusToggle = () => {
         ))}
       </div>
 
-      {/* TIMERS DISPLAY (Only show counters for things the user can actually do) */}
       <div className="bg-gray-50 p-4 rounded-lg border border-gray-100">
         <p className="font-bold text-gray-400 uppercase text-xs mb-3 tracking-wide">Time Utilization (Today)</p>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-y-2 gap-x-8 text-sm font-mono">

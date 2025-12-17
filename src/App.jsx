@@ -11,6 +11,7 @@ import AttendanceCalendar from './pages/AttendanceCalendar';
 import LeadDetails from './pages/LeadDetails';
 import RaiseTicket from './pages/RaiseTicket';
 import AdminTicketDesk from './pages/AdminTicketDesk';
+import AdminAttendance from './pages/AdminAttendance';
 
 function App() {
   return (
@@ -29,6 +30,7 @@ function App() {
           <Route path="/lead-details" element={<LeadDetails />} />
           <Route path="/raise-ticket" element={<RaiseTicket />} />
           <Route path="/admin-tickets" element={<AdminTicketDesk />} />
+          <Route path="/admin-attendance" element={<AdminAttendance />} />
         </Route>
 
       </Routes>

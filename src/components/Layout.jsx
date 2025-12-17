@@ -48,13 +48,15 @@ const Layout = () => {
           )}
 
           {/* 3. ATTENDANCE CALENDAR (Everyone) */}
-          <button
-            onClick={() => navigate('/calendar')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-all ${isActive('/calendar')}`}
-          >
-            <Calendar size={20} />
-            <span>Attendance History</span>
-          </button>
+          {role !== 'Admin' && (
+            <button
+              onClick={() => navigate('/calendar')}
+              className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-all ${isActive('/calendar')}`}
+            >
+              <Calendar size={20} />
+              <span>Attendance History</span>
+            </button>
+          )}
 
           {/* 4. MY LEADS (Everyone EXCEPT Admin) */}
           {role !== 'Admin' && (
@@ -90,6 +92,17 @@ const Layout = () => {
             <span>{(role === 'Admin' || role === 'BranchManager') ? 'Support Desk' : 'Raise Ticket'}</span>
           </button>
 
+
+          {/* ADMIN ATTENDANCE MONITOR */}
+          {role === 'Admin' && (
+            <button
+              onClick={() => navigate('/admin-attendance')}
+              className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-all ${isActive('/admin-attendance')}`}
+            >
+              <Users size={20} />
+              <span>Staff Attendance</span>
+            </button>
+          )}
 
         </nav>
 
