@@ -3,18 +3,16 @@ import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin from '@fullcalendar/interaction';
 import api from '../api/axios';
-import { ShieldCheck, Clock, UserCheck } from 'lucide-react';
+import { ShieldCheck, User, Umbrella, Clock } from 'lucide-react';
 
 const AttendanceCalendar = () => {
   const [events, setEvents] = useState([]);
   const [users, setUsers] = useState([]);
   const [selectedUser, setSelectedUser] = useState("");
   const [hrMode, setHrMode] = useState("holiday"); // 'holiday' or 'leave'
-  const [loading, setLoading] = useState(false);
   
   const role = localStorage.getItem('role');
-  // Define who sees the HR controls
-  const isHR = ['Admin', 'BranchManager', 'HR', 'LeadManager'].includes(role);
+  const isHR = role === 'Admin' || role === 'BranchManager';
 
   useEffect(() => {
     fetchInitialData();
@@ -22,245 +20,152 @@ const AttendanceCalendar = () => {
 
   const fetchInitialData = async () => {
     try {
-      setLoading(true);
-      
-      // 1. Fetch Global Calendar Events (Holidays/Meetings)
+      // FIX 1: Removed '/api' prefix
       const eventsRes = await api.get('/calendar/events');
+      const usersRes = await api.get('/auth/downline');
       
-      // 2. Fetch Users (Only if HR, to populate the dropdown)
-      if (isHR) {
-        const usersRes = await api.get('/auth/downline'); 
-        setUsers(usersRes.data);
-      }
-
-      // 3. Fetch My Attendance (To show personal history)
-      // Note: This calendar primarily shows *your* view. 
-      // HR actions update the database, but won't reflect here unless you select yourself.
-      const myAttendanceRes = await api.get(`/attendance/calendar?month=${new Date().getMonth() + 1}&year=${new Date().getFullYear()}`);
-
-      formatAndSetEvents(eventsRes.data, myAttendanceRes.data);
+      setUsers(usersRes.data);
+      formatEvents(eventsRes.data);
     } catch (err) {
-      console.error("Failed to load calendar data", err);
-    } finally {
-      setLoading(false);
+      console.error("Failed to load data", err);
     }
   };
 
-  const formatAndSetEvents = (calendarEvents, attendanceRecords) => {
-    const formattedEvents = [
-      // 1. Global Events (Holidays = Red, Manual Events = Blue)
-      ...calendarEvents.map(evt => ({
-        id: evt._id,
-        title: evt.title,
-        start: evt.date, // Format: YYYY-MM-DD
-        backgroundColor: evt.isGlobal ? '#ef4444' : '#3b82f6', 
-        borderColor: 'transparent',
-        extendedProps: { type: 'event', isGlobal: evt.isGlobal }
-      })),
-
-      // 2. Attendance Records (My Personal History)
-      ...attendanceRecords.map(rec => {
-        let color = '#10b981'; // Default: Green (Present)
-        let title = 'Present';
-
-        if (rec.currentStatus === 'Paid Leave') {
-          color = '#8b5cf6'; // Purple
-          title = 'Paid Leave';
-        } else if (rec.currentStatus === 'Half Day') {
-          color = '#f59e0b'; // Amber
-          title = 'Half Day';
-        } else if (rec.isLate) {
-          color = '#fcd34d'; // Yellow
-          title = `Late (${rec.lateBy}m)`;
-        }
-
-        return {
-          id: rec._id,
-          title: title,
-          start: rec.date,
-          display: 'background', // Fills the entire day cell
-          backgroundColor: color,
-          extendedProps: { type: 'attendance' }
-        };
-      })
-    ];
-
-    setEvents(formattedEvents);
+  const formatEvents = (rawEvents) => {
+    const formatted = rawEvents.map(evt => ({
+      id: evt._id,
+      title: evt.title,
+      start: evt.date,
+      // Global Holidays = Red, Manual Events = Blue
+      backgroundColor: evt.isGlobal ? '#ef4444' : '#3b82f6',
+      extendedProps: { 
+        type: evt.type,
+        isGlobal: evt.isGlobal 
+      }
+    }));
+    setEvents(formatted);
   };
 
-  // --- INTERACTION HANDLERS ---
-
+  // Logic to handle HR clicks on the calendar
   const handleDateClick = async (arg) => {
-    if (!isHR) return; // Regular employees can't click to add
+    if (!isHR) return;
 
-    // MODE A: HOLIDAY MANAGEMENT
     if (hrMode === "holiday") {
-      const title = prompt(`Create Holiday on ${arg.dateStr}? Enter Name:`);
+      const title = prompt("Enter Holiday Name (e.g., Diwali):");
       if (title) {
-        try {
-          // Calls the Calendar Controller
-          await api.post('/calendar/events', { 
-            title, 
-            date: arg.dateStr, 
-            type: 'Holiday',
-            description: 'Manual Entry' 
-          });
-          fetchInitialData(); // Refresh UI
-        } catch (err) {
-          alert("Failed to save holiday");
-        }
+        // FIX 2: Removed '/api' prefix
+        await api.post('/calendar/events', { title, date: arg.dateStr, type: 'Holiday' });
       }
-    } 
-    // MODE B: EMPLOYEE LEAVE MARKING
-    else {
-      if (!selectedUser) return alert("⚠️ Please select an employee from the dropdown first!");
+    } else {
+      if (!selectedUser) return alert("Please select an employee first!");
+      const type = prompt("Type 'P' for Paid Leave or 'H' for Half Day:").toUpperCase();
       
-      const type = prompt(`Marking for ${arg.dateStr}.\nType 'P' for Paid Leave\nType 'H' for Half Day`).toUpperCase();
       const status = type === 'P' ? 'Paid Leave' : type === 'H' ? 'Half Day' : null;
-
       if (status) {
-        const remarks = prompt("Enter Remarks (Optional):") || "HR Manual Mark";
-        try {
-          // Calls the Attendance Controller (New HR Endpoint)
-          await api.post('/attendance/hr-mark', { 
-            userId: selectedUser, 
-            date: arg.dateStr, 
-            status,
-            remarks
-          });
-          alert(`Success! Marked ${status} for the selected user.`);
-        } catch (err) {
-          alert(err.response?.data?.msg || "Failed to mark attendance");
-        }
+        // FIX 3: Removed '/api' prefix
+        await api.post('/attendance/hr-mark', { 
+          userId: selectedUser, 
+          date: arg.dateStr, 
+          status,
+          remarks: 'HR Manual Entry'
+        });
+        alert(`Marked ${status} for user`);
       }
     }
+    fetchInitialData();
   };
 
   const handleEventClick = async (info) => {
     if (!isHR) return;
     
-    // Only allow deleting Calendar Events (Holidays/Meetings)
-    // We don't delete attendance records this way to preserve history
-    if (info.event.extendedProps.type === 'event') {
-        if (window.confirm(`Remove event: "${info.event.title}"?`)) {
-            try {
-                await api.delete(`/calendar/events/${info.event.id}`);
-                info.event.remove(); // Optimistic update
-            } catch (err) {
-                alert("Failed to delete");
-            }
-        }
+    // Allow deleting holidays
+    if (window.confirm(`Remove holiday: ${info.event.title}?`)) {
+       // FIX 4: Removed '/api' prefix
+       await api.delete(`/calendar/events/${info.event.id}`);
+       info.event.remove(); // Remove from UI instantly
     }
   };
 
+  // --- NEW: THE SYNC BUTTON ---
   const syncHolidays = async () => {
-    if(!window.confirm("Import official Indian Holidays for the current year?")) return;
+    if(!window.confirm("Import official Indian Holidays for this year?")) return;
     try {
+      // FIX 5: Removed '/api' prefix
       const res = await api.post('/calendar/bulk-sync');
       alert(res.data.msg);
       fetchInitialData();
     } catch (err) {
-      alert("Sync failed. Check console.");
+      alert("Sync failed");
     }
   };
 
   return (
-    <div className="max-w-7xl mx-auto h-full flex flex-col">
-      {/* PAGE HEADER */}
+    <div className="max-w-7xl mx-auto p-6">
       <div className="flex justify-between items-center mb-6">
-        <div>
-            <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-                <Clock className="text-brand-medium" /> Attendance & Scheduling
-            </h1>
-            <p className="text-sm text-gray-500">View holidays, shifts, and personal attendance history.</p>
-        </div>
+        <h1 className="text-2xl font-bold text-gray-800">Attendance & Holiday Manager</h1>
         
-        {/* SYNC BUTTON (Visible only to HR) */}
+        {/* SYNC BUTTON FOR HR */}
         {isHR && (
            <button 
              onClick={syncHolidays}
-             className="bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg shadow-sm flex items-center gap-2 text-sm font-bold transition"
+             className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded shadow flex items-center gap-2 text-sm font-bold"
            >
-             <ShieldCheck size={16} className="text-green-600"/> Sync Indian Holidays
+             <Clock size={16} /> Sync Indian Holidays
            </button>
         )}
       </div>
 
-      {/* HR CONTROL PANEL (Visible only to HR) */}
       {isHR && (
-        <div className="bg-white p-4 rounded-xl shadow-md mb-6 border-l-4 border-indigo-500 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center gap-6">
-            
-            {/* TOGGLE MODE */}
+        <div className="bg-white p-4 rounded-xl shadow-md mb-6 border-l-4 border-red-500 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
             <div className="flex flex-col">
-              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Action Mode</label>
+              <label className="text-xs font-bold text-gray-400 uppercase">HR Mode</label>
               <select 
-                className="border border-gray-300 rounded p-2 font-bold text-sm text-gray-700 outline-none focus:ring-2 focus:ring-indigo-200 bg-gray-50"
+                className="border rounded p-1 font-bold text-sm outline-none focus:ring-2 focus:ring-red-200"
                 value={hrMode}
                 onChange={(e) => setHrMode(e.target.value)}
               >
-                <option value="holiday">Manage Holidays</option>
-                <option value="leave">Mark Employee Leave</option>
+                <option value="holiday">Create/Remove Holidays</option>
+                <option value="leave">Mark Employee Leaves</option>
               </select>
             </div>
 
-            {/* EMPLOYEE SELECTOR (Only visible in Leave Mode) */}
             {hrMode === "leave" && (
-              <div className="flex flex-col animate-fadeIn">
-                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Select Staff</label>
-                <div className="relative">
-                    <UserCheck className="absolute left-2 top-2.5 text-gray-400" size={14}/>
-                    <select 
-                    className="border border-gray-300 rounded p-2 pl-7 text-sm outline-none focus:ring-2 focus:ring-indigo-200 bg-white w-48"
-                    value={selectedUser}
-                    onChange={(e) => setSelectedUser(e.target.value)}
-                    >
-                    <option value="">-- Choose User --</option>
-                    {users.map(u => (
-                        <option key={u._id} value={u._id}>{u.name} ({u.role})</option>
-                    ))}
-                    </select>
-                </div>
+              <div className="flex flex-col">
+                <label className="text-xs font-bold text-gray-400 uppercase">Target Employee</label>
+                <select 
+                  className="border rounded p-1 text-sm outline-none focus:ring-2 focus:ring-red-200"
+                  value={selectedUser}
+                  onChange={(e) => setSelectedUser(e.target.value)}
+                >
+                  <option value="">-- Select Staff --</option>
+                  {users.map(u => <option key={u._id} value={u._id}>{u.name}</option>)}
+                </select>
               </div>
             )}
           </div>
-
           <div className="text-right">
-            <p className="text-xs text-indigo-600 font-bold flex items-center justify-end gap-1">
-               HR OVERRIDE ACTIVE <span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span></span>
+            <p className="text-xs text-red-500 font-bold flex items-center justify-end gap-1">
+               <ShieldCheck size={14}/> HR AUTHORIZATION ACTIVE
             </p>
-            <p className="text-[10px] text-gray-400 mt-1">
-                {hrMode === 'holiday' 
-                    ? "Click any date to add a Holiday." 
-                    : "Select a user, then click a date to mark Leave."}
-            </p>
+            <p className="text-[10px] text-gray-400">Click a date to apply changes</p>
           </div>
         </div>
       )}
 
-      {/* CALENDAR COMPONENT */}
-      <div className="bg-white p-6 rounded-xl shadow-xl flex-1 border border-gray-100">
+      <div className="bg-white p-6 rounded-xl shadow-xl">
         <FullCalendar
           plugins={[dayGridPlugin, interactionPlugin]}
           initialView="dayGridMonth"
-          
-          // Interactions
           dateClick={handleDateClick}
           eventClick={handleEventClick}
-          
-          // Data Binding
           events={events}
-          
-          // UI Config
-          height="auto"
-          contentHeight="auto"
+          height="75vh"
           headerToolbar={{
             left: 'prev,next today',
             center: 'title',
             right: 'dayGridMonth'
           }}
-          eventDisplay="block"
-          dayMaxEvents={true}
         />
       </div>
     </div>
